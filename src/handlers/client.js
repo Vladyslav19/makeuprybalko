@@ -32,9 +32,13 @@ function registerClientHandlers(bot) {
       await ctx.reply('У вас поки немає активних записів. Надішліть /book, щоб записатися.');
       return;
     }
-    const lines = mine.map(
-      (b) => `#${b.id} — ${dayjs(b.date).format('DD.MM.YYYY')} о ${b.time}, ${b.service} (${b.price}₴)`
-    );
+    const lines = mine.map((b) => {
+      const endTime = b.duration_min
+        ? dayjs(`${b.date} ${b.time}`, 'YYYY-MM-DD HH:mm').add(Number(b.duration_min), 'minute').format('HH:mm')
+        : null;
+      const timeLabel = endTime ? `${b.time}–${endTime}` : b.time;
+      return `#${b.id} — ${dayjs(b.date).format('DD.MM.YYYY')} о ${timeLabel}, ${b.service} (${b.price}₴)`;
+    });
     await ctx.reply(`Ваші записи:\n\n${lines.join('\n')}\n\nЩоб скасувати: /cancelbooking`);
   };
 

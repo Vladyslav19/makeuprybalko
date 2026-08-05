@@ -17,6 +17,8 @@ const HEADERS = {
     'time',
     'service',
     'price',
+    'duration_min',
+    'slot_times',
     'client_name',
     'phone',
     'client_chat_id',
@@ -57,6 +59,24 @@ async function ensureSheets(doc) {
       });
     }
   }
+}
+
+// ---------- Утиліти для роботи з часом (HH:mm) ----------
+
+function timeToMinutes(time) {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function minutesToTime(totalMinutes) {
+  const normalized = ((totalMinutes % 1440) + 1440) % 1440;
+  const h = Math.floor(normalized / 60);
+  const m = normalized % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function addMinutesToTime(time, minutes) {
+  return minutesToTime(timeToMinutes(time) + minutes);
 }
 
 // ---------- Services ----------
@@ -108,6 +128,31 @@ async function addSlot(date, time) {
   await sheet.addRow({ date, time, status: 'free' });
 }
 
+// Масово створює вільні слоти на одну дату з кроком SLOT_INTERVAL_MINUTES,
+// починаючи з startTime (включно) і до endTime (не включно).
+// Наприклад addSlotsRange('2026-08-10', '10:00', '18:00') створить
+// слоти 10:00, 10:30, 11:00 ... 17:30 (якщо крок 30 хв).
+async function addSlotsRange(date, startTime, endTime) {
+  const interval = config.SLOT_INTERVAL_MINUTES;
+  const existing = new Set((await getFreeSlots()).filter((s) => s.date === date).map((s) => s.time));
+  const created = [];
+  const skipped = [];
+  let cur = timeToMinutes(startTime);
+  const end = timeToMinutes(endTime);
+  while (cur < end) {
+    const time = minutesToTime(cur);
+    if (existing.has(time)) {
+      skipped.push(time);
+    } else {
+      await addSlot(date, time);
+      existing.add(time);
+      created.push(time);
+    }
+    cur += interval;
+  }
+  return { created, skipped };
+}
+
 async function removeSlot(date, time) {
   const doc = await getDoc();
   const sheet = doc.sheetsByTitle[SHEET_TITLES.SLOTS];
@@ -133,9 +178,49 @@ async function markSlotStatus(date, time, status) {
   return false;
 }
 
+// Повертає список можливих "стартів" запису для послуги заданої тривалості:
+// для кожного вільного слота перевіряє, чи є достатньо послідовних вільних
+// слотів підряд (з кроком SLOT_INTERVAL_MINUTES), щоб вмістити всю послугу.
+// Кожен елемент результату містить slotTimes — точний список часів, які треба
+// зайняти, якщо клієнт обере саме цей старт.
+async function getBookableStartSlots(durationMin) {
+  const interval = config.SLOT_INTERVAL_MINUTES;
+  const neededCount = Math.max(1, Math.ceil(Number(durationMin) / interval));
+
+  const freeSlots = await getFreeSlots();
+  const byDate = {};
+  for (const s of freeSlots) {
+    if (!byDate[s.date]) byDate[s.date] = new Set();
+    byDate[s.date].add(s.time);
+  }
+
+  const result = [];
+  for (const date of Object.keys(byDate)) {
+    const set = byDate[date];
+    for (const time of set) {
+      const slotTimes = [];
+      let cur = time;
+      let ok = true;
+      for (let i = 0; i < neededCount; i++) {
+        if (!set.has(cur)) {
+          ok = false;
+          break;
+        }
+        slotTimes.push(cur);
+        cur = addMinutesToTime(cur, interval);
+      }
+      if (ok) {
+        result.push({ date, time, slotTimes });
+      }
+    }
+  }
+
+  return result.sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
+}
+
 // ---------- Bookings ----------
 
-async function addBooking({ date, time, service, price, clientName, phone, clientChatId }) {
+async function addBooking({ date, time, service, price, durationMin, slotTimes, clientName, phone, clientChatId }) {
   const doc = await getDoc();
   const sheet = doc.sheetsByTitle[SHEET_TITLES.BOOKINGS];
   const id = `${Date.now()}`;
@@ -145,6 +230,8 @@ async function addBooking({ date, time, service, price, clientName, phone, clien
     time,
     service,
     price,
+    duration_min: durationMin,
+    slot_times: slotTimes.join(','),
     client_name: clientName,
     phone,
     client_chat_id: String(clientChatId),
@@ -152,7 +239,9 @@ async function addBooking({ date, time, service, price, clientName, phone, clien
     reminder_sent: 'no',
     created_at: new Date().toISOString(),
   });
-  await markSlotStatus(date, time, 'booked');
+  for (const t of slotTimes) {
+    await markSlotStatus(date, t, 'booked');
+  }
   return id;
 }
 
@@ -168,6 +257,8 @@ async function getBookings({ status } = {}) {
       time: row.get('time'),
       service: row.get('service'),
       price: row.get('price'),
+      duration_min: row.get('duration_min'),
+      slot_times: row.get('slot_times'),
       client_name: row.get('client_name'),
       phone: row.get('phone'),
       client_chat_id: row.get('client_chat_id'),
@@ -183,7 +274,14 @@ async function cancelBooking(id) {
   if (!match) return null;
   match._row.set('status', 'cancelled');
   await match._row.save();
-  await markSlotStatus(match.date, match.time, 'free');
+
+  const slotTimes = (match.slot_times || match.time || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  for (const t of slotTimes) {
+    await markSlotStatus(match.date, t, 'free');
+  }
   return match;
 }
 
@@ -202,8 +300,10 @@ module.exports = {
   deleteServiceByName,
   getFreeSlots,
   addSlot,
+  addSlotsRange,
   removeSlot,
   markSlotStatus,
+  getBookableStartSlots,
   addBooking,
   getBookings,
   cancelBooking,

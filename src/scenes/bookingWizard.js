@@ -18,6 +18,10 @@ function formatDateLabel(dateStr) {
   return dayjs(dateStr).format('DD.MM.YYYY (dd)');
 }
 
+function formatEndTime(date, time, durationMin) {
+  return dayjs(`${date} ${time}`, 'YYYY-MM-DD HH:mm').add(Number(durationMin), 'minute').format('HH:mm');
+}
+
 async function enterScene(ctx) {
   const services = await sheets.getServices();
   if (!services.length) {
@@ -51,13 +55,18 @@ async function chooseService(ctx) {
   }
   ctx.wizard.state.booking.service = service.name;
   ctx.wizard.state.booking.price = service.price;
+  ctx.wizard.state.booking.durationMin = Number(service.duration_min);
 
-  const freeSlots = await sheets.getFreeSlots();
-  if (!freeSlots.length) {
-    await ctx.reply('Вільних слотів поки немає. Спробуйте пізніше або напишіть майстру напряму.');
+  // Шукаємо не просто вільні слоти, а такі, де підряд вистачає слотів під усю
+  // тривалість послуги (наприклад, для 90 хв при кроці 30 хв потрібно 3 підряд).
+  const bookable = await sheets.getBookableStartSlots(ctx.wizard.state.booking.durationMin);
+  if (!bookable.length) {
+    await ctx.reply(
+      'На жаль, немає достатньо вільного часу підряд для цієї послуги. Спробуйте коротшу послугу або напишіть майстру напряму.'
+    );
     return ctx.scene.leave();
   }
-  const dates = [...new Set(freeSlots.map((s) => s.date))];
+  const dates = [...new Set(bookable.map((s) => s.date))];
   const buttons = dates.map((d) => [Markup.button.callback(formatDateLabel(d), `date:${d}`)]);
   await ctx.editMessageText('Оберіть дату:', Markup.inlineKeyboard(buttons));
   return ctx.wizard.next();
@@ -74,14 +83,17 @@ async function chooseDate(ctx) {
   const date = data.slice(5);
   ctx.wizard.state.booking.date = date;
 
-  const freeSlots = await sheets.getFreeSlots();
-  const times = freeSlots.filter((s) => s.date === date).map((s) => s.time);
+  const durationMin = ctx.wizard.state.booking.durationMin;
+  const bookable = await sheets.getBookableStartSlots(durationMin);
+  const times = bookable.filter((s) => s.date === date).map((s) => s.time);
   if (!times.length) {
-    await ctx.reply('На цю дату слотів вже не залишилось, оберіть іншу: /book');
+    await ctx.reply('На цю дату вже не вистачає вільного часу підряд, оберіть іншу дату: /book');
     return ctx.scene.leave();
   }
-  const buttons = times.map((t) => [Markup.button.callback(t, `time:${t}`)]);
-  await ctx.editMessageText(`Дата: ${formatDateLabel(date)}\nОберіть час:`, Markup.inlineKeyboard(buttons));
+  const buttons = times.map((t) => [
+    Markup.button.callback(`${t}–${formatEndTime(date, t, durationMin)}`, `time:${t}`),
+  ]);
+  await ctx.editMessageText(`Дата: ${formatDateLabel(date)}\nОберіть час початку:`, Markup.inlineKeyboard(buttons));
   return ctx.wizard.next();
 }
 
@@ -131,7 +143,7 @@ async function askPhone(ctx) {
     `Перевірте дані запису:\n\n` +
       `Послуга: ${b.service}\n` +
       `Дата: ${formatDateLabel(b.date)}\n` +
-      `Час: ${b.time}\n` +
+      `Час: ${b.time}–${formatEndTime(b.date, b.time, b.durationMin)}\n` +
       `Ім'я: ${b.clientName}\n` +
       `Телефон: ${b.phone}\n` +
       `Вартість: ${b.price}₴`,
@@ -160,11 +172,12 @@ async function confirmBooking(ctx) {
   }
   const b = ctx.wizard.state.booking;
 
-  // На всяк випадок перевіряємо, що слот ще вільний (раптом хтось встиг його зайняти).
-  const freeSlots = await sheets.getFreeSlots();
-  const stillFree = freeSlots.some((s) => s.date === b.date && s.time === b.time);
-  if (!stillFree) {
-    await ctx.editMessageText('На жаль, цей час вже зайняли, поки ви обирали. Почніть заново: /book');
+  // На всяк випадок перевіряємо ще раз, що всі потрібні слоти підряд досі вільні
+  // (раптом хтось встиг зайняти щось із них, поки клієнт заповнював форму).
+  const bookable = await sheets.getBookableStartSlots(b.durationMin);
+  const match = bookable.find((s) => s.date === b.date && s.time === b.time);
+  if (!match) {
+    await ctx.editMessageText('На жаль, цей час (повністю або частково) вже зайняли, поки ви обирали. Почніть заново: /book');
     return ctx.scene.leave();
   }
 
@@ -173,13 +186,16 @@ async function confirmBooking(ctx) {
     time: b.time,
     service: b.service,
     price: b.price,
+    durationMin: b.durationMin,
+    slotTimes: match.slotTimes,
     clientName: b.clientName,
     phone: b.phone,
     clientChatId: ctx.from.id,
   });
 
+  const endTime = formatEndTime(b.date, b.time, b.durationMin);
   await ctx.editMessageText(
-    `Готово! Вас записано на ${formatDateLabel(b.date)} о ${b.time} (${b.service}).\n` +
+    `Готово! Вас записано на ${formatDateLabel(b.date)}, ${b.time}–${endTime} (${b.service}).\n` +
       `Ми надішлемо нагадування за ${config.REMINDER_HOURS_BEFORE} год. до візиту.`
   );
 
@@ -189,7 +205,7 @@ async function confirmBooking(ctx) {
         config.ADMIN_CHAT_ID,
         `📅 Новий запис #${id}\n` +
           `Послуга: ${b.service} (${b.price}₴)\n` +
-          `Дата: ${formatDateLabel(b.date)} о ${b.time}\n` +
+          `Дата: ${formatDateLabel(b.date)}, ${b.time}–${endTime}\n` +
           `Клієнт: ${b.clientName}, тел. ${b.phone}\n` +
           `Telegram: @${ctx.from.username || '—'} (id ${ctx.from.id})`
       )

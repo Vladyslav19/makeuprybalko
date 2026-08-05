@@ -29,6 +29,11 @@ function parseDateArg(raw) {
   return null;
 }
 
+function formatEndTime(date, time, durationMin) {
+  if (!durationMin) return null;
+  return dayjs(`${date} ${time}`, 'YYYY-MM-DD HH:mm').add(Number(durationMin), 'minute').format('HH:mm');
+}
+
 function registerAdminHandlers(bot) {
   bot.command('admin', requireAdmin(async (ctx) => {
     await ctx.reply(
@@ -39,7 +44,8 @@ function registerAdminHandlers(bot) {
         '  /delservice Назва\n\n' +
         '🕐 Слоти (вільний час)\n' +
         '  /slots — список вільних слотів\n' +
-        '  /addslot ДД.ММ.РРРР ГГ:ХХ\n' +
+        '  /addslot ДД.ММ.РРРР ГГ:ХХ — один слот\n' +
+        `  /addslots ДД.ММ.РРРР ГГ:ХХ ГГ:ХХ — діапазон слотів з кроком ${config.SLOT_INTERVAL_MINUTES} хв\n` +
         '  /delslot ДД.ММ.РРРР ГГ:ХХ\n\n' +
         '📖 Записи\n' +
         '  /bookings — майбутні записи клієнтів'
@@ -108,6 +114,29 @@ function registerAdminHandlers(bot) {
     await ctx.reply(`Слот додано: ${dayjs(date).format('DD.MM.YYYY')} ${time}`);
   }));
 
+  bot.command('addslots', requireAdmin(async (ctx) => {
+    const args = ctx.message.text.split(' ').slice(1);
+    if (args.length !== 3) {
+      await ctx.reply(
+        'Формат: /addslots ДД.ММ.РРРР ГГ:ХХ_початок ГГ:ХХ_кінець\n' +
+          `Наприклад: /addslots 10.08.2026 10:00 18:00 — створить слоти кожні ${config.SLOT_INTERVAL_MINUTES} хв з 10:00 до 17:30 включно`
+      );
+      return;
+    }
+    const date = parseDateArg(args[0]);
+    const [start, end] = [args[1], args[2]];
+    if (!date || !/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) {
+      await ctx.reply('Не розпізнав дату або час. Формат: /addslots ДД.ММ.РРРР ГГ:ХХ ГГ:ХХ');
+      return;
+    }
+    const { created, skipped } = await sheets.addSlotsRange(date, start, end);
+    let msg = `Готово: створено ${created.length} слот(ів) на ${dayjs(date).format('DD.MM.YYYY')} (${created.join(', ') || '—'}).`;
+    if (skipped.length) {
+      msg += `\nВже існували і були пропущені: ${skipped.join(', ')}.`;
+    }
+    await ctx.reply(msg);
+  }));
+
   bot.command('delslot', requireAdmin(async (ctx) => {
     const args = ctx.message.text.split(' ').slice(1);
     if (args.length !== 2) {
@@ -134,8 +163,10 @@ function registerAdminHandlers(bot) {
     }
     const sorted = bookings.sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
     for (const b of sorted) {
+      const endTime = formatEndTime(b.date, b.time, b.duration_min);
+      const timeLabel = endTime ? `${b.time}–${endTime}` : b.time;
       await ctx.reply(
-        `#${b.id} — ${dayjs(b.date).format('DD.MM.YYYY')} ${b.time}\n` +
+        `#${b.id} — ${dayjs(b.date).format('DD.MM.YYYY')} ${timeLabel}\n` +
           `${b.service} (${b.price}₴)\n` +
           `Клієнт: ${b.client_name}, тел. ${b.phone}`,
         Markup.inlineKeyboard([Markup.button.callback('❌ Скасувати запис', `admin_cancel:${b.id}`)])
