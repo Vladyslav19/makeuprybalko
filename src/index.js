@@ -56,17 +56,26 @@ async function start() {
     // Режим webhook — рекомендуется для хостинга (Render и т.п.)
     const webhookPath = `/telegraf/${config.BOT_TOKEN}`;
     app.use(bot.webhookCallback(webhookPath));
+    // Порт открываем СРАЗУ — Render должен увидеть открытый порт быстро,
+    // иначе он решит, что деплой не удался.
+    app.listen(config.PORT, () => {
+      console.log(`HTTP-сервер слушает порт ${config.PORT}`);
+    });
     await bot.telegram.setWebhook(`${config.PUBLIC_URL}${webhookPath}`);
     console.log(`Webhook установлен на ${config.PUBLIC_URL}${webhookPath}`);
   } else {
-    // Режим polling — удобен для локальной разработки
-    await bot.launch();
-    console.log('Бот запущен в режиме long polling (локальный режим)');
+    // Режим polling. Важно: bot.launch() в режиме long polling НЕ завершается,
+    // пока бот не остановлен — это бесконечный цикл получения обновлений.
+    // Поэтому нельзя его ждать (await) перед открытием порта: код ниже просто
+    // никогда бы не выполнился. Открываем порт сразу, а бота запускаем "в фоне".
+    app.listen(config.PORT, () => {
+      console.log(`HTTP-сервер слушает порт ${config.PORT}`);
+    });
+    bot
+      .launch()
+      .then(() => console.log('Бот запущен в режиме long polling'))
+      .catch((e) => console.error('Ошибка запуска бота (polling):', e));
   }
-
-  app.listen(config.PORT, () => {
-    console.log(`HTTP-сервер слушает порт ${config.PORT}`);
-  });
 }
 
 start().catch((e) => {
