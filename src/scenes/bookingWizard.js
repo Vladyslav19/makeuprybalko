@@ -1,5 +1,7 @@
 const { Scenes, Markup } = require('telegraf');
 const dayjs = require('dayjs');
+require('dayjs/locale/uk');
+dayjs.locale('uk');
 const sheets = require('../sheets');
 const config = require('../config');
 
