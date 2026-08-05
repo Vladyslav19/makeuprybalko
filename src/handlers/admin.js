@@ -5,6 +5,7 @@ dayjs.extend(customParseFormat);
 
 const sheets = require('../sheets');
 const config = require('../config');
+const { runSlotGeneration } = require('../slotsGenerator');
 
 function isAdmin(ctx) {
   return config.ADMIN_CHAT_ID && String(ctx.from.id) === config.ADMIN_CHAT_ID;
@@ -47,6 +48,11 @@ function registerAdminHandlers(bot) {
         '  /addslot ДД.ММ.РРРР ГГ:ХХ — один слот\n' +
         `  /addslots ДД.ММ.РРРР ГГ:ХХ ГГ:ХХ — діапазон слотів з кроком ${config.SLOT_INTERVAL_MINUTES} хв\n` +
         '  /delslot ДД.ММ.РРРР ГГ:ХХ\n\n' +
+        '📅 Графік роботи (автоматичні слоти)\n' +
+        '  /workhours — показати поточний графік\n' +
+        '  /setworkhours День ГГ:ХХ ГГ:ХХ — задати робочі години дня\n' +
+        '  /delworkhours День — зробити день вихідним\n' +
+        `  /generateweek — одразу відкрити слоти на ${config.DAYS_AHEAD_TO_GENERATE} дн. вперед за графіком\n\n` +
         '📖 Записи\n' +
         '  /bookings — майбутні записи клієнтів'
     );
@@ -151,6 +157,67 @@ function registerAdminHandlers(bot) {
     }
     const ok = await sheets.removeSlot(date, time);
     await ctx.reply(ok ? 'Слот видалено.' : 'Такий вільний слот не знайдено.');
+  }));
+
+  // ---------- Графік роботи (автогенерація слотів) ----------
+
+  bot.command('workhours', requireAdmin(async (ctx) => {
+    const wh = await sheets.getWorkHours();
+    const lines = sheets.WEEKDAY_ORDER.map((code) => {
+      const entry = wh[code];
+      return entry ? `${code}: ${entry.start}–${entry.end}` : `${code}: вихідний`;
+    });
+    await ctx.reply(
+      `Графік роботи:\n\n${lines.join('\n')}\n\n` +
+        'Змінити день: /setworkhours День ГГ:ХХ ГГ:ХХ\n' +
+        'Зробити вихідним: /delworkhours День'
+    );
+  }));
+
+  bot.command('setworkhours', requireAdmin(async (ctx) => {
+    const args = ctx.message.text.split(' ').slice(1);
+    if (args.length !== 3) {
+      await ctx.reply(
+        'Формат: /setworkhours День ГГ:ХХ_початок ГГ:ХХ_кінець\n' +
+          `Дні: ${sheets.WEEKDAY_ORDER.join(', ')}\n` +
+          'Наприклад: /setworkhours Пн 10:00 18:00'
+      );
+      return;
+    }
+    const code = sheets.WEEKDAY_ORDER.find((c) => c.toLowerCase() === args[0].trim().toLowerCase());
+    const [start, end] = [args[1], args[2]];
+    if (!code) {
+      await ctx.reply(`Не розпізнав день тижня. Використовуйте: ${sheets.WEEKDAY_ORDER.join(', ')}`);
+      return;
+    }
+    if (!/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) {
+      await ctx.reply('Не розпізнав час. Формат ГГ:ХХ, наприклад 10:00');
+      return;
+    }
+    await sheets.setWorkHour(code, start, end);
+    await ctx.reply(`Графік оновлено: ${code} ${start}–${end}.\nЩоб одразу відкрити слоти на найближчі дні за новим графіком: /generateweek`);
+  }));
+
+  bot.command('delworkhours', requireAdmin(async (ctx) => {
+    const raw = ctx.message.text.split(' ').slice(1).join(' ').trim();
+    const code = sheets.WEEKDAY_ORDER.find((c) => c.toLowerCase() === raw.toLowerCase());
+    if (!code) {
+      await ctx.reply(`Формат: /delworkhours День (${sheets.WEEKDAY_ORDER.join(', ')})`);
+      return;
+    }
+    const ok = await sheets.deleteWorkHour(code);
+    await ctx.reply(ok ? `${code} тепер вихідний.` : `${code} і так вже був без графіка.`);
+  }));
+
+  bot.command('generateweek', requireAdmin(async (ctx) => {
+    await ctx.reply(`Генерую слоти на найближчі ${config.DAYS_AHEAD_TO_GENERATE} дн. за графіком роботи...`);
+    const summary = await runSlotGeneration();
+    if (!summary.length) {
+      await ctx.reply('Нових слотів не додано — або графік порожній (/workhours), або всі слоти на ці дні вже існують.');
+      return;
+    }
+    const lines = summary.map((s) => `• ${dayjs(s.date).format('DD.MM.YYYY')} (${s.weekday}) — додано ${s.created} слот(ів)`);
+    await ctx.reply(`Готово:\n${lines.join('\n')}`);
   }));
 
   // ---------- Записи ----------

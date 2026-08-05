@@ -62,7 +62,7 @@ async function chooseService(ctx) {
   const bookable = await sheets.getBookableStartSlots(ctx.wizard.state.booking.durationMin);
   if (!bookable.length) {
     await ctx.reply(
-      'На жаль, немає достатньо вільного часу підряд для цієї послуги. Спробуйте коротшу послугу або напишіть майстру напряму.'
+      'На жаль, немає достатньо вільного часу підряд для цієї послуги. Напишіть майстру напряму.'
     );
     return ctx.scene.leave();
   }

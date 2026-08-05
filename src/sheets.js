@@ -1,11 +1,13 @@
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
+const dayjs = require('dayjs');
 const config = require('./config');
 
 const SHEET_TITLES = {
   SERVICES: 'Services',
   SLOTS: 'Slots',
   BOOKINGS: 'Bookings',
+  WORK_HOURS: 'WorkHours',
 };
 
 const HEADERS = {
@@ -26,7 +28,14 @@ const HEADERS = {
     'reminder_sent',
     'created_at',
   ],
+  [SHEET_TITLES.WORK_HOURS]: ['weekday', 'start', 'end'],
 };
+
+// Порядок днів тижня (Пн — перший день, як зазвичай в українському календарі).
+// Індекс у масиві НЕ відповідає dayjs .day() (там 0 = неділя) — для цього є WEEKDAY_BY_DAYJS_INDEX.
+const WEEKDAY_ORDER = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
+// dayjs .day(): 0=неділя, 1=понеділок, ... 6=субота
+const WEEKDAY_BY_DAYJS_INDEX = ['Нд', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
 let docPromise = null;
 
@@ -293,8 +302,72 @@ async function markReminderSent(id) {
   await match._row.save();
 }
 
+// ---------- Графік роботи (WorkHours) ----------
+
+// Повертає графік у вигляді { 'Пн': {start:'10:00', end:'18:00'}, ... }.
+// Дні, яких немає в таблиці, вважаються вихідними.
+async function getWorkHours() {
+  const doc = await getDoc();
+  const sheet = doc.sheetsByTitle[SHEET_TITLES.WORK_HOURS];
+  const rows = await sheet.getRows();
+  const result = {};
+  for (const row of rows) {
+    const weekday = row.get('weekday');
+    if (!weekday) continue;
+    result[weekday] = { start: row.get('start'), end: row.get('end'), _row: row };
+  }
+  return result;
+}
+
+async function setWorkHour(weekday, start, end) {
+  const doc = await getDoc();
+  const sheet = doc.sheetsByTitle[SHEET_TITLES.WORK_HOURS];
+  const rows = await sheet.getRows();
+  const match = rows.find((r) => r.get('weekday') === weekday);
+  if (match) {
+    match.set('start', start);
+    match.set('end', end);
+    await match.save();
+  } else {
+    await sheet.addRow({ weekday, start, end });
+  }
+}
+
+async function deleteWorkHour(weekday) {
+  const doc = await getDoc();
+  const sheet = doc.sheetsByTitle[SHEET_TITLES.WORK_HOURS];
+  const rows = await sheet.getRows();
+  const match = rows.find((r) => r.get('weekday') === weekday);
+  if (match) {
+    await match.delete();
+    return true;
+  }
+  return false;
+}
+
+// Генерує (за потреби) слоти на найближчі daysAhead днів на основі графіка
+// роботи. Вже наявні слоти не чіпає й не дублює (addSlotsRange сам пропускає
+// існуючі). Повертає масив { date, created } лише для днів, де щось додалося.
+async function generateUpcomingSlots(daysAhead) {
+  const workHours = await getWorkHours();
+  const summary = [];
+  for (let i = 0; i < daysAhead; i++) {
+    const d = dayjs().add(i, 'day');
+    const weekday = WEEKDAY_BY_DAYJS_INDEX[d.day()];
+    const wh = workHours[weekday];
+    if (!wh || !wh.start || !wh.end) continue;
+    const date = d.format('YYYY-MM-DD');
+    const { created } = await addSlotsRange(date, wh.start, wh.end);
+    if (created.length) {
+      summary.push({ date, weekday, created: created.length });
+    }
+  }
+  return summary;
+}
+
 module.exports = {
   SHEET_TITLES,
+  WEEKDAY_ORDER,
   getServices,
   addService,
   deleteServiceByName,
@@ -308,4 +381,8 @@ module.exports = {
   getBookings,
   cancelBooking,
   markReminderSent,
+  getWorkHours,
+  setWorkHour,
+  deleteWorkHour,
+  generateUpcomingSlots,
 };
