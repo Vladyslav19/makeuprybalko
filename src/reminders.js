@@ -3,8 +3,8 @@ const dayjs = require('dayjs');
 const sheets = require('./sheets');
 const config = require('./config');
 
-// Проверяет предстоящие записи и шлёт напоминание клиенту, если до визита осталось
-// меньше REMINDER_HOURS_BEFORE часов и напоминание ещё не отправлялось.
+// Перевіряє майбутні записи і надсилає нагадування клієнту, якщо до візиту
+// залишилось менше REMINDER_HOURS_BEFORE годин і нагадування ще не надсилалось.
 async function runReminderCheck(bot) {
   const bookings = await sheets.getBookings({ status: 'confirmed' });
   const now = dayjs();
@@ -15,28 +15,28 @@ async function runReminderCheck(bot) {
     if (b.reminder_sent === 'yes') continue;
     const visitAt = dayjs(`${b.date} ${b.time}`, 'YYYY-MM-DD HH:mm');
     if (!visitAt.isValid()) continue;
-    // Напоминаем, только если визит ещё не прошёл и попадает в окно напоминания
+    // Нагадуємо, тільки якщо візит ще не пройшов і потрапляє у вікно нагадування
     if (visitAt.isAfter(now) && visitAt.isBefore(windowEnd)) {
       try {
         await bot.telegram.sendMessage(
           b.client_chat_id,
-          `⏰ Напоминание: у вас запись на ${visitAt.format('DD.MM.YYYY')} в ${b.time} (${b.service}). Ждём вас!`
+          `⏰ Нагадування: у вас запис на ${visitAt.format('DD.MM.YYYY')} о ${b.time} (${b.service}). Чекаємо на вас!`
         );
         await sheets.markReminderSent(b.id);
         sent += 1;
       } catch (e) {
-        console.error(`Не удалось отправить напоминание для брони #${b.id}:`, e.message);
+        console.error(`Не вдалося надіслати нагадування для запису #${b.id}:`, e.message);
       }
     }
   }
   return { checked: bookings.length, sent };
 }
 
-// Внутренний cron-таймер работает, пока процесс не спит (годится для VPS/Railway).
-// На бесплатном Render с усыплением используйте дополнительно внешний пинг на /reminders/run.
+// Внутрішній cron-таймер працює, поки процес не "спить" (годиться для VPS/Railway).
+// На безкоштовному Render з засинанням додатково використовуйте зовнішній пінг на /reminders/run.
 function scheduleInternalReminderCron(bot) {
   cron.schedule('*/15 * * * *', () => {
-    runReminderCheck(bot).catch((e) => console.error('Ошибка проверки напоминаний:', e));
+    runReminderCheck(bot).catch((e) => console.error('Помилка перевірки нагадувань:', e));
   });
 }
 

@@ -20,21 +20,21 @@ async function enterScene(ctx) {
   const services = await sheets.getServices();
   if (!services.length) {
     await ctx.reply(
-      'Пока нет ни одной услуги в прайсе. Попросите мастера добавить услуги через админ-панель (/admin).'
+      'Поки немає жодної послуги в прайсі. Попросіть майстра додати послуги через адмін-панель (/admin).'
     );
     return ctx.scene.leave();
   }
   ctx.wizard.state.booking = {};
   const buttons = services.map((s) => [
-    Markup.button.callback(`${s.name} — ${s.price}₽ (${s.duration_min} мин)`, `svc:${s.name}`),
+    Markup.button.callback(`${s.name} — ${s.price}₴ (${s.duration_min} хв)`, `svc:${s.name}`),
   ]);
-  await ctx.reply('Выберите услугу:', Markup.inlineKeyboard(buttons));
+  await ctx.reply('Оберіть послугу:', Markup.inlineKeyboard(buttons));
   return ctx.wizard.next();
 }
 
 async function chooseService(ctx) {
   if (!ctx.callbackQuery) {
-    await ctx.reply('Пожалуйста, выберите услугу кнопкой выше.');
+    await ctx.reply('Будь ласка, оберіть послугу кнопкою вище.');
     return;
   }
   const data = ctx.callbackQuery.data;
@@ -44,7 +44,7 @@ async function chooseService(ctx) {
   const services = await sheets.getServices();
   const service = services.find((s) => s.name === serviceName);
   if (!service) {
-    await ctx.reply('Эта услуга больше недоступна, начните заново: /book');
+    await ctx.reply('Ця послуга вже недоступна, почніть заново: /book');
     return ctx.scene.leave();
   }
   ctx.wizard.state.booking.service = service.name;
@@ -52,18 +52,18 @@ async function chooseService(ctx) {
 
   const freeSlots = await sheets.getFreeSlots();
   if (!freeSlots.length) {
-    await ctx.reply('Свободных слотов пока нет. Попробуйте позже или напишите мастеру напрямую.');
+    await ctx.reply('Вільних слотів поки немає. Спробуйте пізніше або напишіть майстру напряму.');
     return ctx.scene.leave();
   }
   const dates = [...new Set(freeSlots.map((s) => s.date))];
   const buttons = dates.map((d) => [Markup.button.callback(formatDateLabel(d), `date:${d}`)]);
-  await ctx.editMessageText('Выберите дату:', Markup.inlineKeyboard(buttons));
+  await ctx.editMessageText('Оберіть дату:', Markup.inlineKeyboard(buttons));
   return ctx.wizard.next();
 }
 
 async function chooseDate(ctx) {
   if (!ctx.callbackQuery) {
-    await ctx.reply('Пожалуйста, выберите дату кнопкой выше.');
+    await ctx.reply('Будь ласка, оберіть дату кнопкою вище.');
     return;
   }
   const data = ctx.callbackQuery.data;
@@ -75,17 +75,17 @@ async function chooseDate(ctx) {
   const freeSlots = await sheets.getFreeSlots();
   const times = freeSlots.filter((s) => s.date === date).map((s) => s.time);
   if (!times.length) {
-    await ctx.reply('На эту дату слотов уже не осталось, выберите другую: /book');
+    await ctx.reply('На цю дату слотів вже не залишилось, оберіть іншу: /book');
     return ctx.scene.leave();
   }
   const buttons = times.map((t) => [Markup.button.callback(t, `time:${t}`)]);
-  await ctx.editMessageText(`Дата: ${formatDateLabel(date)}\nВыберите время:`, Markup.inlineKeyboard(buttons));
+  await ctx.editMessageText(`Дата: ${formatDateLabel(date)}\nОберіть час:`, Markup.inlineKeyboard(buttons));
   return ctx.wizard.next();
 }
 
 async function chooseTime(ctx) {
   if (!ctx.callbackQuery) {
-    await ctx.reply('Пожалуйста, выберите время кнопкой выше.');
+    await ctx.reply('Будь ласка, оберіть час кнопкою вище.');
     return;
   }
   const data = ctx.callbackQuery.data;
@@ -93,19 +93,19 @@ async function chooseTime(ctx) {
   if (!data.startsWith('time:')) return;
   const time = data.slice(5);
   ctx.wizard.state.booking.time = time;
-  await ctx.editMessageText('Как вас зовут? Напишите имя.');
+  await ctx.editMessageText('Як вас звати? Напишіть ім\'я.');
   return ctx.wizard.next();
 }
 
 async function askName(ctx) {
   if (!ctx.message || !ctx.message.text) {
-    await ctx.reply('Напишите имя текстом.');
+    await ctx.reply('Напишіть ім\'я текстом.');
     return;
   }
   ctx.wizard.state.booking.clientName = ctx.message.text.trim();
   await ctx.reply(
-    'Укажите номер телефона для связи (можно нажать кнопку, чтобы поделиться контактом):',
-    Markup.keyboard([Markup.button.contactRequest('📱 Отправить телефон')])
+    'Вкажіть номер телефону для зв\'язку (можна натиснути кнопку, щоб поділитися контактом):',
+    Markup.keyboard([Markup.button.contactRequest('📱 Надіслати телефон')])
       .oneTime()
       .resize()
   );
@@ -120,26 +120,26 @@ async function askPhone(ctx) {
     phone = ctx.message.text.trim();
   }
   if (!phone) {
-    await ctx.reply('Пришлите номер телефона текстом или кнопкой.');
+    await ctx.reply('Надішліть номер телефону текстом або кнопкою.');
     return;
   }
   ctx.wizard.state.booking.phone = phone;
   const b = ctx.wizard.state.booking;
   await ctx.reply(
-    `Проверьте данные записи:\n\n` +
-      `Услуга: ${b.service}\n` +
+    `Перевірте дані запису:\n\n` +
+      `Послуга: ${b.service}\n` +
       `Дата: ${formatDateLabel(b.date)}\n` +
-      `Время: ${b.time}\n` +
-      `Имя: ${b.clientName}\n` +
+      `Час: ${b.time}\n` +
+      `Ім'я: ${b.clientName}\n` +
       `Телефон: ${b.phone}\n` +
-      `Стоимость: ${b.price}₽`,
+      `Вартість: ${b.price}₴`,
     Markup.removeKeyboard()
   );
   await ctx.reply(
-    'Всё верно?',
+    'Все вірно?',
     Markup.inlineKeyboard([
-      Markup.button.callback('✅ Подтвердить', 'confirm:yes'),
-      Markup.button.callback('❌ Отменить', 'confirm:no'),
+      Markup.button.callback('✅ Підтвердити', 'confirm:yes'),
+      Markup.button.callback('❌ Скасувати', 'confirm:no'),
     ])
   );
   return ctx.wizard.next();
@@ -147,22 +147,22 @@ async function askPhone(ctx) {
 
 async function confirmBooking(ctx) {
   if (!ctx.callbackQuery) {
-    await ctx.reply('Нажмите «Подтвердить» или «Отменить» выше.');
+    await ctx.reply('Натисніть «Підтвердити» або «Скасувати» вище.');
     return;
   }
   const data = ctx.callbackQuery.data;
   await ctx.answerCbQuery();
   if (data === 'confirm:no') {
-    await ctx.editMessageText('Запись отменена. Чтобы начать заново, отправьте /book');
+    await ctx.editMessageText('Запис скасовано. Щоб почати заново, надішліть /book');
     return ctx.scene.leave();
   }
   const b = ctx.wizard.state.booking;
 
-  // На всякий случай перепроверяем, что слот всё ещё свободен (вдруг кто-то успел его занять).
+  // На всяк випадок перевіряємо, що слот ще вільний (раптом хтось встиг його зайняти).
   const freeSlots = await sheets.getFreeSlots();
   const stillFree = freeSlots.some((s) => s.date === b.date && s.time === b.time);
   if (!stillFree) {
-    await ctx.editMessageText('К сожалению, это время уже заняли, пока вы выбирали. Начните заново: /book');
+    await ctx.editMessageText('На жаль, цей час вже зайняли, поки ви обирали. Почніть заново: /book');
     return ctx.scene.leave();
   }
 
@@ -177,21 +177,21 @@ async function confirmBooking(ctx) {
   });
 
   await ctx.editMessageText(
-    `Готово! Вы записаны на ${formatDateLabel(b.date)} в ${b.time} (${b.service}).\n` +
-      `Мы пришлём напоминание за ${config.REMINDER_HOURS_BEFORE} ч. до визита.`
+    `Готово! Вас записано на ${formatDateLabel(b.date)} о ${b.time} (${b.service}).\n` +
+      `Ми надішлемо нагадування за ${config.REMINDER_HOURS_BEFORE} год. до візиту.`
   );
 
   if (config.ADMIN_CHAT_ID) {
     await ctx.telegram
       .sendMessage(
         config.ADMIN_CHAT_ID,
-        `📅 Новая запись #${id}\n` +
-          `Услуга: ${b.service} (${b.price}₽)\n` +
-          `Дата: ${formatDateLabel(b.date)} в ${b.time}\n` +
-          `Клиент: ${b.clientName}, тел. ${b.phone}\n` +
+        `📅 Новий запис #${id}\n` +
+          `Послуга: ${b.service} (${b.price}₴)\n` +
+          `Дата: ${formatDateLabel(b.date)} о ${b.time}\n` +
+          `Клієнт: ${b.clientName}, тел. ${b.phone}\n` +
           `Telegram: @${ctx.from.username || '—'} (id ${ctx.from.id})`
       )
-      .catch((e) => console.error('Не удалось уведомить мастера:', e.message));
+      .catch((e) => console.error('Не вдалося сповістити майстра:', e.message));
   }
 
   return ctx.scene.leave();

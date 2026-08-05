@@ -45,7 +45,7 @@ async function getDoc() {
   return docPromise;
 }
 
-// Создаёт недостающие вкладки с нужными заголовками, если их ещё нет в таблице.
+// Створює відсутні вкладки з потрібними заголовками, якщо їх ще немає в таблиці.
 async function ensureSheets(doc) {
   for (const title of Object.values(SHEET_TITLES)) {
     let sheet = doc.sheetsByTitle[title];

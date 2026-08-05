@@ -3,7 +3,7 @@ require('dotenv').config();
 function required(name) {
   const value = process.env[name];
   if (!value) {
-    console.warn(`[config] Внимание: переменная окружения ${name} не задана`);
+    console.warn(`[config] Увага: змінна середовища ${name} не задана`);
   }
   return value;
 }
@@ -13,7 +13,7 @@ module.exports = {
   ADMIN_CHAT_ID: String(process.env.ADMIN_CHAT_ID || ''),
   SHEET_ID: required('SHEET_ID'),
   GOOGLE_SERVICE_ACCOUNT_EMAIL: required('GOOGLE_SERVICE_ACCOUNT_EMAIL'),
-  // В .env приватный ключ хранится с \n вместо переносов строк — разворачиваем обратно
+  // У .env приватний ключ зберігається з \n замість переносів рядків — розгортаємо назад
   GOOGLE_PRIVATE_KEY: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
   REMINDER_HOURS_BEFORE: Number(process.env.REMINDER_HOURS_BEFORE || 24),
   CRON_SECRET: process.env.CRON_SECRET || '',

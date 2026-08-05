@@ -8,7 +8,7 @@ const { registerAdminHandlers } = require('./handlers/admin');
 const { runReminderCheck, scheduleInternalReminderCron } = require('./reminders');
 
 if (!config.BOT_TOKEN) {
-  console.error('BOT_TOKEN не задан. Проверьте .env / переменные окружения на хостинге.');
+  console.error('BOT_TOKEN не задано. Перевірте .env / змінні середовища на хостингу.');
   process.exit(1);
 }
 
@@ -22,10 +22,10 @@ registerClientHandlers(bot);
 registerAdminHandlers(bot);
 
 bot.catch((err, ctx) => {
-  console.error(`Ошибка при обработке обновления ${ctx.updateType}:`, err);
+  console.error(`Помилка під час обробки оновлення ${ctx.updateType}:`, err);
 });
 
-// Внутренний таймер напоминаний — работает, пока процесс не "спит".
+// Внутрішній таймер нагадувань — працює, поки процес не "спить".
 scheduleInternalReminderCron(bot);
 
 const app = express();
@@ -35,9 +35,9 @@ app.get('/', (_req, res) => {
   res.send('Makeup booking bot is running');
 });
 
-// Точка входа для внешнего cron-пинга (например, cron-job.org), чтобы:
-// 1) не давать бесплатному хостингу "засыпать";
-// 2) гарантированно проверять и слать напоминания, даже если внутренний cron не успел сработать.
+// Точка входу для зовнішнього cron-пінгу (наприклад, cron-job.org або UptimeRobot), щоб:
+// 1) не давати безкоштовному хостингу "засинати";
+// 2) гарантовано перевіряти й надсилати нагадування, навіть якщо внутрішній cron не встиг спрацювати.
 app.get('/reminders/run', async (req, res) => {
   if (config.CRON_SECRET && req.query.secret !== config.CRON_SECRET) {
     return res.status(403).json({ error: 'forbidden' });
@@ -46,40 +46,40 @@ app.get('/reminders/run', async (req, res) => {
     const result = await runReminderCheck(bot);
     res.json({ ok: true, ...result });
   } catch (e) {
-    console.error('Ошибка /reminders/run:', e);
+    console.error('Помилка /reminders/run:', e);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
 
 async function start() {
   if (config.PUBLIC_URL) {
-    // Режим webhook — рекомендуется для хостинга (Render и т.п.)
+    // Режим webhook — рекомендується для хостингу (Render тощо)
     const webhookPath = `/telegraf/${config.BOT_TOKEN}`;
     app.use(bot.webhookCallback(webhookPath));
-    // Порт открываем СРАЗУ — Render должен увидеть открытый порт быстро,
-    // иначе он решит, что деплой не удался.
+    // Порт відкриваємо ОДРАЗУ — Render має побачити відкритий порт швидко,
+    // інакше він вирішить, що деплой не вдався.
     app.listen(config.PORT, () => {
-      console.log(`HTTP-сервер слушает порт ${config.PORT}`);
+      console.log(`HTTP-сервер слухає порт ${config.PORT}`);
     });
     await bot.telegram.setWebhook(`${config.PUBLIC_URL}${webhookPath}`);
-    console.log(`Webhook установлен на ${config.PUBLIC_URL}${webhookPath}`);
+    console.log(`Webhook встановлено на ${config.PUBLIC_URL}${webhookPath}`);
   } else {
-    // Режим polling. Важно: bot.launch() в режиме long polling НЕ завершается,
-    // пока бот не остановлен — это бесконечный цикл получения обновлений.
-    // Поэтому нельзя его ждать (await) перед открытием порта: код ниже просто
-    // никогда бы не выполнился. Открываем порт сразу, а бота запускаем "в фоне".
+    // Режим polling. Важливо: bot.launch() у режимі long polling НЕ завершується,
+    // поки бот не зупинено — це нескінченний цикл отримання оновлень.
+    // Тому не можна його чекати (await) перед відкриттям порту: код нижче просто
+    // ніколи б не виконався. Відкриваємо порт одразу, а бота запускаємо "у фоні".
     app.listen(config.PORT, () => {
-      console.log(`HTTP-сервер слушает порт ${config.PORT}`);
+      console.log(`HTTP-сервер слухає порт ${config.PORT}`);
     });
     bot
       .launch()
-      .then(() => console.log('Бот запущен в режиме long polling'))
-      .catch((e) => console.error('Ошибка запуска бота (polling):', e));
+      .then(() => console.log('Бот запущено в режимі long polling'))
+      .catch((e) => console.error('Помилка запуску бота (polling):', e));
   }
 }
 
 start().catch((e) => {
-  console.error('Не удалось запустить бота:', e);
+  console.error('Не вдалося запустити бота:', e);
   process.exit(1);
 });
 
