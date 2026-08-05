@@ -68,7 +68,10 @@ async function chooseService(ctx) {
   }
   const dates = [...new Set(bookable.map((s) => s.date))];
   const buttons = dates.map((d) => [Markup.button.callback(formatDateLabel(d), `date:${d}`)]);
-  await ctx.editMessageText('Оберіть дату:', Markup.inlineKeyboard(buttons));
+  await ctx.editMessageText(
+    'Оберіть дату:\n\nЯкщо немає зручної дати — напишіть майстру напряму.',
+    Markup.inlineKeyboard(buttons)
+  );
   return ctx.wizard.next();
 }
 
@@ -93,7 +96,10 @@ async function chooseDate(ctx) {
   const buttons = times.map((t) => [
     Markup.button.callback(`${t}–${formatEndTime(date, t, durationMin)}`, `time:${t}`),
   ]);
-  await ctx.editMessageText(`Дата: ${formatDateLabel(date)}\nОберіть час початку:`, Markup.inlineKeyboard(buttons));
+  await ctx.editMessageText(
+    `Дата: ${formatDateLabel(date)}\nОберіть час початку:\n\nЯкщо немає зручного часу — напишіть майстру напряму.`,
+    Markup.inlineKeyboard(buttons)
+  );
   return ctx.wizard.next();
 }
 
