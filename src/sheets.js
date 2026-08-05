@@ -127,6 +127,10 @@ async function getFreeSlots() {
   const rows = await sheet.getRows();
   return rows
     .filter((row) => (row.get('status') || 'free') === 'free')
+    // Ігноруємо биті/порожні рядки (наприклад, випадковий порожній рядок у
+    // таблиці) — без дати або часу слот все одно непридатний для бронювання,
+    // а без цього фільтра він ламав пошук послідовних слотів (undefined.split).
+    .filter((row) => row.get('date') && row.get('time'))
     .map((row) => ({ date: row.get('date'), time: row.get('time'), _row: row }))
     .sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
 }
@@ -196,7 +200,11 @@ async function getBookableStartSlots(durationMin) {
   const interval = config.SLOT_INTERVAL_MINUTES;
   const neededCount = Math.max(1, Math.ceil(Number(durationMin) / interval));
 
-  const freeSlots = await getFreeSlots();
+  // Сьогоднішню дату клієнтам не пропонуємо — запис на сьогодні через бота
+  // не приймаємо (адміну ці слоти все одно лишаються доступні в таблиці).
+  const today = dayjs().format('YYYY-MM-DD');
+
+  const freeSlots = (await getFreeSlots()).filter((s) => s.date !== today);
   const byDate = {};
   for (const s of freeSlots) {
     if (!byDate[s.date]) byDate[s.date] = new Set();
