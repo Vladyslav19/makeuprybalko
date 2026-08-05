@@ -22,19 +22,73 @@ function formatEndTime(date, time, durationMin) {
   return dayjs(`${date} ${time}`, 'YYYY-MM-DD HH:mm').add(Number(durationMin), 'minute').format('HH:mm');
 }
 
-async function enterScene(ctx) {
+// Показує список послуг. Використовується і при вході в сцену, і при натисканні
+// "Назад" з екрана вибору дати.
+async function renderServiceList(ctx) {
   const services = await sheets.getServices();
   if (!services.length) {
     await ctx.reply(
       'Поки немає жодної послуги в прайсі. Попросіть майстра додати послуги через адмін-панель (/admin).'
     );
-    return ctx.scene.leave();
+    return false;
   }
-  ctx.wizard.state.booking = {};
   const buttons = services.map((s) => [
     Markup.button.callback(`${s.name} — ${s.price}₴ (${s.duration_min} хв)`, `svc:${s.name}`),
   ]);
-  await ctx.reply('Оберіть послугу:', Markup.inlineKeyboard(buttons));
+  if (ctx.callbackQuery) {
+    await ctx.editMessageText('Оберіть послугу:', Markup.inlineKeyboard(buttons));
+  } else {
+    await ctx.reply('Оберіть послугу:', Markup.inlineKeyboard(buttons));
+  }
+  return true;
+}
+
+// Показує список доступних дат для вже обраної послуги (ctx.wizard.state.booking.durationMin).
+// Використовується і при переході вперед з вибору послуги, і при натисканні
+// "Назад" з екрана вибору часу.
+async function renderDateList(ctx) {
+  const durationMin = ctx.wizard.state.booking.durationMin;
+  const bookable = await sheets.getBookableStartSlots(durationMin);
+  if (!bookable.length) {
+    await ctx.reply(
+      'На жаль, немає достатньо вільного часу підряд для цієї послуги. Напишіть майстру напряму.'
+    );
+    return false;
+  }
+  const dates = [...new Set(bookable.map((s) => s.date))];
+  const buttons = dates.map((d) => [Markup.button.callback(formatDateLabel(d), `date:${d}`)]);
+  buttons.push([Markup.button.callback('⬅️ Назад (до послуг)', 'back')]);
+  await ctx.editMessageText(
+    'Оберіть дату:\n\nЯкщо немає зручної дати — напишіть майстру напряму.',
+    Markup.inlineKeyboard(buttons)
+  );
+  return true;
+}
+
+// Показує список доступного часу початку для обраної дати.
+async function renderTimeList(ctx, date) {
+  const durationMin = ctx.wizard.state.booking.durationMin;
+  const bookable = await sheets.getBookableStartSlots(durationMin);
+  const times = bookable.filter((s) => s.date === date).map((s) => s.time);
+  if (!times.length) {
+    await ctx.reply('На цю дату вже не вистачає вільного часу підряд, оберіть іншу дату: /book');
+    return false;
+  }
+  const buttons = times.map((t) => [
+    Markup.button.callback(`${t}–${formatEndTime(date, t, durationMin)}`, `time:${t}`),
+  ]);
+  buttons.push([Markup.button.callback('⬅️ Назад (до дати)', 'back')]);
+  await ctx.editMessageText(
+    `Дата: ${formatDateLabel(date)}\nОберіть час початку:\n\nЯкщо немає зручного часу — напишіть майстру напряму.`,
+    Markup.inlineKeyboard(buttons)
+  );
+  return true;
+}
+
+async function enterScene(ctx) {
+  ctx.wizard.state.booking = {};
+  const ok = await renderServiceList(ctx);
+  if (!ok) return ctx.scene.leave();
   return ctx.wizard.next();
 }
 
@@ -59,19 +113,8 @@ async function chooseService(ctx) {
 
   // Шукаємо не просто вільні слоти, а такі, де підряд вистачає слотів під усю
   // тривалість послуги (наприклад, для 90 хв при кроці 30 хв потрібно 3 підряд).
-  const bookable = await sheets.getBookableStartSlots(ctx.wizard.state.booking.durationMin);
-  if (!bookable.length) {
-    await ctx.reply(
-      'На жаль, немає достатньо вільного часу підряд для цієї послуги. Напишіть майстру напряму.'
-    );
-    return ctx.scene.leave();
-  }
-  const dates = [...new Set(bookable.map((s) => s.date))];
-  const buttons = dates.map((d) => [Markup.button.callback(formatDateLabel(d), `date:${d}`)]);
-  await ctx.editMessageText(
-    'Оберіть дату:\n\nЯкщо немає зручної дати — напишіть майстру напряму.',
-    Markup.inlineKeyboard(buttons)
-  );
+  const ok = await renderDateList(ctx);
+  if (!ok) return ctx.scene.leave();
   return ctx.wizard.next();
 }
 
@@ -82,24 +125,20 @@ async function chooseDate(ctx) {
   }
   const data = ctx.callbackQuery.data;
   await ctx.answerCbQuery();
+
+  if (data === 'back') {
+    const ok = await renderServiceList(ctx);
+    if (!ok) return ctx.scene.leave();
+    ctx.wizard.selectStep(1); // повертаємось на крок вибору послуги (chooseService)
+    return;
+  }
+
   if (!data.startsWith('date:')) return;
   const date = data.slice(5);
   ctx.wizard.state.booking.date = date;
 
-  const durationMin = ctx.wizard.state.booking.durationMin;
-  const bookable = await sheets.getBookableStartSlots(durationMin);
-  const times = bookable.filter((s) => s.date === date).map((s) => s.time);
-  if (!times.length) {
-    await ctx.reply('На цю дату вже не вистачає вільного часу підряд, оберіть іншу дату: /book');
-    return ctx.scene.leave();
-  }
-  const buttons = times.map((t) => [
-    Markup.button.callback(`${t}–${formatEndTime(date, t, durationMin)}`, `time:${t}`),
-  ]);
-  await ctx.editMessageText(
-    `Дата: ${formatDateLabel(date)}\nОберіть час початку:\n\nЯкщо немає зручного часу — напишіть майстру напряму.`,
-    Markup.inlineKeyboard(buttons)
-  );
+  const ok = await renderTimeList(ctx, date);
+  if (!ok) return ctx.scene.leave();
   return ctx.wizard.next();
 }
 
@@ -110,6 +149,14 @@ async function chooseTime(ctx) {
   }
   const data = ctx.callbackQuery.data;
   await ctx.answerCbQuery();
+
+  if (data === 'back') {
+    const ok = await renderDateList(ctx);
+    if (!ok) return ctx.scene.leave();
+    ctx.wizard.selectStep(2); // повертаємось на крок вибору дати (chooseDate)
+    return;
+  }
+
   if (!data.startsWith('time:')) return;
   const time = data.slice(5);
   ctx.wizard.state.booking.time = time;
