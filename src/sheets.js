@@ -237,6 +237,48 @@ async function getBookableStartSlots(durationMin) {
 
 // ---------- Bookings ----------
 
+// Проста внутрішньопроцесна черга (мьютекс), щоб перевірка "слот вільний" і
+// сам запис відбувались як єдина неподільна операція. Без цього два клієнти,
+// які тиснуть "Підтвердити" майже одночасно, можуть обидва пройти перевірку
+// ДО того, як хтось із них встигне зайняти слот — і обидва запишуться на один
+// і той самий час (саме це й трапилось). Спрацьовує, поки бот працює як один
+// процес (стандартний випадок для Render free-тарифу).
+let bookingQueue = Promise.resolve();
+function withBookingLock(fn) {
+  const run = bookingQueue.then(fn, fn);
+  bookingQueue = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
+// Атомарно перевіряє, що потрібні слоти підряд досі вільні, і одразу створює
+// запис. Повертає { ok: false } якщо хтось встиг зайняти час, поки клієнт
+// підтверджував. Це основний спосіб створення запису з боку клієнта —
+// замість окремих getBookableStartSlots() + addBooking().
+async function bookSlotsAtomic({ date, time, service, price, durationMin, clientName, phone, clientChatId }) {
+  return withBookingLock(async () => {
+    const bookable = await getBookableStartSlots(durationMin);
+    const match = bookable.find((s) => s.date === date && s.time === time);
+    if (!match) {
+      return { ok: false };
+    }
+    const id = await addBooking({
+      date,
+      time,
+      service,
+      price,
+      durationMin,
+      slotTimes: match.slotTimes,
+      clientName,
+      phone,
+      clientChatId,
+    });
+    return { ok: true, id, slotTimes: match.slotTimes };
+  });
+}
+
 async function addBooking({ date, time, service, price, durationMin, slotTimes, clientName, phone, clientChatId }) {
   const doc = await getDoc();
   const sheet = doc.sheetsByTitle[SHEET_TITLES.BOOKINGS];
@@ -385,6 +427,7 @@ module.exports = {
   removeSlot,
   markSlotStatus,
   getBookableStartSlots,
+  bookSlotsAtomic,
   addBooking,
   getBookings,
   cancelBooking,
