@@ -225,26 +225,26 @@ async function confirmBooking(ctx) {
   }
   const b = ctx.wizard.state.booking;
 
-  // На всяк випадок перевіряємо ще раз, що всі потрібні слоти підряд досі вільні
-  // (раптом хтось встиг зайняти щось із них, поки клієнт заповнював форму).
-  const bookable = await sheets.getBookableStartSlots(b.durationMin);
-  const match = bookable.find((s) => s.date === b.date && s.time === b.time);
-  if (!match) {
-    await ctx.editMessageText('На жаль, цей час (повністю або частково) вже зайняли, поки ви обирали. Почніть заново: /book');
-    return ctx.scene.leave();
-  }
-
-  const id = await sheets.addBooking({
+  // Перевірка "слот вільний" і сам запис виконуються атомарно (bookSlotsAtomic
+  // ставить це в чергу всередині процесу) — так двоє клієнтів, які тиснуть
+  // "Підтвердити" майже одночасно, не зможуть обидва пройти перевірку і
+  // зайняти один і той самий час.
+  const result = await sheets.bookSlotsAtomic({
     date: b.date,
     time: b.time,
     service: b.service,
     price: b.price,
     durationMin: b.durationMin,
-    slotTimes: match.slotTimes,
     clientName: b.clientName,
     phone: b.phone,
     clientChatId: ctx.from.id,
   });
+
+  if (!result.ok) {
+    await ctx.editMessageText('На жаль, цей час (повністю або частково) вже зайняли, поки ви обирали. Почніть заново: /book');
+    return ctx.scene.leave();
+  }
+  const id = result.id;
 
   const endTime = formatEndTime(b.date, b.time, b.durationMin);
   await ctx.editMessageText(
