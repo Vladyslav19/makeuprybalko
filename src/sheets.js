@@ -216,11 +216,14 @@ async function getBookableStartSlots(durationMin) {
   const interval = config.SLOT_INTERVAL_MINUTES;
   const neededCount = Math.max(1, Math.ceil(Number(durationMin) / interval));
 
-  // Сьогоднішню дату клієнтам не пропонуємо — запис на сьогодні через бота
-  // не приймаємо (адміну ці слоти все одно лишаються доступні в таблиці).
+  // Сьогоднішню дату клієнтам не пропонуємо (запис на сьогодні через бота не
+  // приймаємо), а будь-які дати РАНІШЕ сьогодні — це вже прострочені слоти
+  // (наприклад, лишились незакритими з минулого) і показувати їх точно не
+  // можна. Порівняння рядків ISO-дат (YYYY-MM-DD) працює як звичайне
+  // хронологічне порівняння.
   const today = dayjs().format('YYYY-MM-DD');
 
-  const freeSlots = (await getFreeSlots()).filter((s) => s.date !== today);
+  const freeSlots = (await getFreeSlots()).filter((s) => s.date > today);
   const byDate = {};
   for (const s of freeSlots) {
     if (!byDate[s.date]) byDate[s.date] = new Set();
