@@ -35,6 +35,7 @@ async function renderServiceList(ctx) {
   const buttons = services.map((s) => [
     Markup.button.callback(`${s.name} — ${s.price}₴ (${s.duration_min} хв)`, `svc:${s.name}`),
   ]);
+  buttons.push([Markup.button.callback('⬅️ Назад', 'back')]);
   if (ctx.callbackQuery) {
     await ctx.editMessageText('Оберіть послугу:', Markup.inlineKeyboard(buttons));
   } else {
@@ -99,6 +100,12 @@ async function chooseService(ctx) {
   }
   const data = ctx.callbackQuery.data;
   await ctx.answerCbQuery();
+
+  if (data === 'back') {
+    await ctx.editMessageText('Скасовано. Щоб почати запис знову, надішліть /book');
+    return ctx.scene.leave();
+  }
+
   if (!data.startsWith('svc:')) return;
   const serviceName = data.slice(4);
   const services = await sheets.getServices();
