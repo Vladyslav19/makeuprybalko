@@ -141,13 +141,29 @@ async function addSlot(date, time) {
   await sheet.addRow({ date, time, status: 'free' });
 }
 
+// Усі слоти (і вільні, і заброньовані) — на відміну від getFreeSlots(), яка
+// свідомо ховає зайняті. Потрібна там, де важливо не створити дубль слота,
+// що вже існує, незалежно від його статусу.
+async function getAllSlots() {
+  const doc = await getDoc();
+  const sheet = doc.sheetsByTitle[SHEET_TITLES.SLOTS];
+  const rows = await sheet.getRows();
+  return rows
+    .filter((row) => row.get('date') && row.get('time'))
+    .map((row) => ({ date: row.get('date'), time: row.get('time'), status: row.get('status'), _row: row }));
+}
+
 // Масово створює вільні слоти на одну дату з кроком SLOT_INTERVAL_MINUTES,
 // починаючи з startTime (включно) і до endTime (не включно).
 // Наприклад addSlotsRange('2026-08-10', '10:00', '18:00') створить
 // слоти 10:00, 10:30, 11:00 ... 17:30 (якщо крок 30 хв).
 async function addSlotsRange(date, startTime, endTime) {
   const interval = config.SLOT_INTERVAL_MINUTES;
-  const existing = new Set((await getFreeSlots()).filter((s) => s.date === date).map((s) => s.time));
+  // Важливо: перевіряємо ВСІ слоти на цю дату (а не лише вільні) — інакше
+  // вже заброньований час не вважається "існуючим", і при повторному запуску
+  // (наприклад, авто-генерацією раз на кілька хвилин) для нього створюється
+  // дублікат-рядок зі статусом "free".
+  const existing = new Set((await getAllSlots()).filter((s) => s.date === date).map((s) => s.time));
   const created = [];
   const skipped = [];
   let cur = timeToMinutes(startTime);
